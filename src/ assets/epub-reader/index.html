@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>EPUB Reader</title>
+    <script src="https://unpkg.com/epubjs/dist/epub.min.js"></script>
+    <style>
+        html, body, #viewer {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+<div id="viewer"></div>
+<script>
+    const base64 = window.BOOK_BASE64 || '';
+    async function openEPUB() {
+        try {
+            const blob = await (await fetch(`data:application/epub+zip;base64,${base64}`)).blob();
+            const blobUrl = URL.createObjectURL(blob);
+
+            const book = ePub(blobUrl);
+            const rendition = book.renderTo("viewer", {
+                width: "100%",
+                height: "100%",
+            });
+
+            rendition.display();
+        } catch (e) {
+            document.body.innerHTML = '<h3 style="color:red;">❌ Помилка при відкритті EPUB</h3>' + e;
+        }
+    }
+
+    openEPUB();
+</script>
+</body>
+</html>
