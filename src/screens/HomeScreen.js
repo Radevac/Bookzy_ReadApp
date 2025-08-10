@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { initBookDB, fetchBooks, deleteBook } from '../utils/database';
 import { pickPdfFile } from '../utils/pdfPicker';
+import { pickEpubFile } from '../utils/epubPicker';
 import { useNavigation } from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
 
@@ -35,20 +36,28 @@ export default function HomeScreen() {
             console.log('📗 Додано нову книгу:', book);
             navigation.navigate('Reader', { book });
             await loadBooks();
-        } else {
-            console.log('⛔ Книгу не вибрано або вибір скасовано');
         }
     };
-
 
     const handleOpenBook = async (book) => {
-        if (!book.base64) {
-            Alert.alert('⛔ Помилка', 'Цей файл не має збережених даних PDF.');
-            return;
-        }
+        if (book.format === 'pdf') {
+            if (!book.base64) {
+                Alert.alert('⛔ Помилка', 'Цей файл не має збережених даних PDF.');
+                return;
+            }
 
-        navigation.navigate('Reader', { book });
+            navigation.navigate('Reader', { book });
+        } else if (book.format === 'epub') {
+            const fileInfo = await FileSystem.getInfoAsync(book.path);
+            if (!fileInfo.exists) {
+                Alert.alert('Файл не знайдено', 'Цей файл більше не існує.');
+                return;
+            }
+
+            navigation.navigate('EpubReader', { book });
+        }
     };
+
     const confirmDelete = (book) => {
         Alert.alert(
             'Видалити книгу?',
@@ -73,23 +82,41 @@ export default function HomeScreen() {
         console.log('📋 Дані з таблиці books:', books);
     };
 
-    const renderItem = ({ item }) => (
-        <View style={styles.itemContainer}>
-            <TouchableOpacity
-                onPress={() => handleOpenBook(item)}
-                style={styles.itemText}
-            >
-                <Text>{item.title}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => confirmDelete(item)}>
-                <Text style={styles.deleteIcon}>🗑</Text>
-            </TouchableOpacity>
-        </View>
-    );
+    const renderItem = ({ item }) => {
+        const currentPage = item.currentPage || 0;
+        const totalPages = item.totalPages || 1;
+        const progress = Math.min((currentPage / totalPages) * 100, 100);
+
+        return (
+            <View style={styles.bookCard}>
+                <TouchableOpacity onPress={() => handleOpenBook(item)} style={{ flex: 1 }}>
+                    <Text style={styles.bookTitle}>{item.title}</Text>
+                    <Text style={styles.bookProgressText}>
+                        Сторінка {currentPage} з {totalPages} — {Math.round(progress)}%
+                    </Text>
+                    <View style={styles.progressBar}>
+                        <View style={[styles.progressFill, { width: `${progress}%` }]} />
+                    </View>
+                    <Text style={styles.continueText}>📖 Продовжити читання</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => confirmDelete(item)} style={{ paddingLeft: 10 }}>
+                    <Text style={styles.deleteIcon}>🗑</Text>
+                </TouchableOpacity>
+            </View>
+        );
+    };
 
     return (
         <View style={styles.container}>
             <Button title="📥 Обрати PDF" onPress={handlePickPdf} />
+            <View style={{ height: 10 }} />
+            <Button title="📘 Обрати EPUB" onPress={async () => {
+                const book = await pickEpubFile();
+                if (book) {
+                    navigation.navigate('EpubReader', { book });
+                    await loadBooks();
+                }
+            }} />
             <View style={{ height: 10 }} />
             <Button title="📋 Логи бази" onPress={logBooks} />
             <FlatList
@@ -103,22 +130,50 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, padding: 16 },
-    itemContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingVertical: 10,
-        paddingHorizontal: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#ccc',
-    },
-    itemText: {
+    container: {
         flex: 1,
+        padding: 16,
+        backgroundColor: '#fff',
+    },
+    bookCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f9f9f9',
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#ddd',
+    },
+    bookTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 4,
+    },
+    bookProgressText: {
+        fontSize: 13,
+        color: '#555',
+    },
+    progressBar: {
+        height: 6,
+        backgroundColor: '#e0e0e0',
+        borderRadius: 4,
+        overflow: 'hidden',
+        marginTop: 6,
+        marginBottom: 4,
+    },
+    progressFill: {
+        height: '100%',
+        backgroundColor: '#4caf50',
+    },
+    continueText: {
+        fontSize: 14,
+        color: '#1e8c45',
+        marginTop: 4,
+        fontWeight: '500',
     },
     deleteIcon: {
-        fontSize: 18,
+        fontSize: 20,
         color: 'red',
-        paddingLeft: 12,
     },
 });

@@ -7,6 +7,7 @@ export default function EpubReader({ route }) {
     const webViewRef = useRef(null);
 
     const base64 = book.base64.replace(/^data:application\/epub\+zip;base64,/, '');
+    const currentPage = book.currentPage ?? 0;
 
     const html = `
 <!DOCTYPE html>
@@ -31,49 +32,75 @@ export default function EpubReader({ route }) {
             window.ReactNativeWebView.postMessage("❌ ERROR: " + message + "\\n" + (error?.stack || ""));
         };
 
-        try {
-            const base64 = "${base64}";
-            const binaryString = atob(base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
+        const base64 = "${base64}";
+        const binaryString = atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        const blob = new Blob([bytes], { type: "application/epub+zip" });
+        const book = ePub(blob);
+        const rendition = book.renderTo("viewer", {
+            width: "100%",
+            height: "100%",
+            spread: "none"
+        });
+
+        rendition.themes.default({
+            body: {
+                "font-size": "120%",
+                "line-height": "1.6",
+                "text-align": "justify",
+                "padding": "1em",
+                "margin": "0 auto",
+                "max-width": "95%",
+            },
+            img: {
+                "max-width": "100%",
+                "height": "auto",
+                "display": "block",
+                "margin": "1em auto"
+            }
+        });
+
+        let totalLocations = 0;
+        let currentLocation = 0;
+        const savedLocation = ${currentPage};
+
+        book.ready.then(() => {
+            return book.locations.generate(1600);
+        }).then(() => {
+            totalLocations = book.locations.length();
+
+            // відновлення позиції
+            if (savedLocation > 0 && totalLocations > 0) {
+                const cfi = book.locations.cfiFromLocation(savedLocation);
+                rendition.display(cfi);
+            } else {
+                rendition.display();
             }
 
-            const blob = new Blob([bytes], { type: "application/epub+zip" });
-            const book = ePub(blob);
-
-            const rendition = book.renderTo("viewer", {
-                width: "100%",
-                height: "100%",
-                spread: "none" 
+            rendition.on("relocated", (location) => {
+                currentLocation = book.locations.locationFromCfi(location.start.cfi);
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'progress',
+                    currentLocation,
+                    totalLocations
+                }));
             });
 
-            rendition.themes.default({
-                body: {
-                    "font-size": "120%",
-                    "line-height": "1.6",
-                    "text-align": "justify",
-                    "padding": "1em",
-                    "margin": "0 auto",
-                    "max-width": "95%",
-                },
-                img: {
-                    "max-width": "100%",
-                    "height": "auto",
-                    "display": "block",
-                    "margin": "1em auto"
-                }
-            });
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'init',
+                currentLocation: savedLocation,
+                totalLocations
+            }));
+        });
 
-            window.book = book;
-            window.rendition = rendition;
-            window.currentFontSize = 120;
-
-            rendition.display();
-        } catch (e) {
-            window.ReactNativeWebView.postMessage("❌ JS Exception: " + e.message);
-        }
+        window.book = book;
+        window.rendition = rendition;
+        window.currentFontSize = 120;
     </script>
 </body>
 </html>
@@ -83,20 +110,21 @@ export default function EpubReader({ route }) {
         webViewRef.current?.injectJavaScript(`${cmd}; true;`);
     };
 
-    sendCommand(`
-    window.currentFontSize += 20;
-    window.rendition.themes.fontSize(window.currentFontSize + '%');
-`);
+    const handleMessage = async (event) => {
+        const data = event.nativeEvent.data;
+        if (data.startsWith('❌')) {
+            Alert.alert('Помилка EPUB', data);
+            return;
+        }
 
-    sendCommand(`
-    window.currentFontSize = Math.max(80, window.currentFontSize - 20);
-    window.rendition.themes.fontSize(window.currentFontSize + '%');
-`);
-
-    const handleLog = (event) => {
-        console.log('📩 WebView message:', event.nativeEvent.data);
-        if (event.nativeEvent.data.startsWith('❌')) {
-            Alert.alert('Помилка EPUB', event.nativeEvent.data);
+        try {
+            const parsed = JSON.parse(data);
+            if (parsed.type === 'progress' || parsed.type === 'init') {
+                console.log(`📚 EPUB Прогрес: ${parsed.currentLocation} / ${parsed.totalLocations}`);
+                // виклик updateBookProgress тут, або передай в onMessage
+            }
+        } catch (err) {
+            console.error('❌ EPUB WebView parse error:', err);
         }
     };
 
@@ -108,13 +136,13 @@ export default function EpubReader({ route }) {
                 source={{ html }}
                 javaScriptEnabled
                 style={{ flex: 1 }}
-                onMessage={handleLog}
+                onMessage={handleMessage}
             />
             <View style={styles.controls}>
                 <Button title="⬅️ Назад" onPress={() => sendCommand('window.rendition.prev()')} />
                 <Button title="➡️ Вперед" onPress={() => sendCommand('window.rendition.next()')} />
-                <Button title="🔎+" onPress={() => sendCommand(`window.rendition.themes.fontSize('140%')`)} />
-                <Button title="🔎−" onPress={() => sendCommand(`window.rendition.themes.fontSize('100%')`)} />
+                <Button title="🔎+" onPress={() => sendCommand('window.currentFontSize += 20; window.rendition.themes.fontSize(window.currentFontSize + "%")')} />
+                <Button title="🔎−" onPress={() => sendCommand('window.currentFontSize = Math.max(80, window.currentFontSize - 20); window.rendition.themes.fontSize(window.currentFontSize + "%")')} />
             </View>
         </View>
     );
