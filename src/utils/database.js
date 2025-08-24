@@ -61,3 +61,8 @@ export const updateBookProgress = async (id, currentPage, totalPages) => {
         [currentPage, totalPages, id]
     );
 };
+
+export const getBookById = async (id) => {
+    const result = await db.getFirstAsync('SELECT * FROM books WHERE id = ?', [id]);
+    return result;
+};
