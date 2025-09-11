@@ -1,27 +1,47 @@
-import React, { useRef, useMemo } from 'react';
+import React, {
+    forwardRef,
+    useMemo,
+    useRef,
+    useImperativeHandle,
+} from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 
-interface PdfViewerProps {
+export interface PdfViewerProps {
     base64: string;
     bookId?: number;
     onMessage?: (event: any) => void;
     currentPage?: number;
+    searchTerm: string;
 }
 
-export default function PdfViewer({ base64, bookId, onMessage, currentPage }: PdfViewerProps) {
-    const webViewRef = useRef(null);
+export interface PdfViewerHandle {
+    injectJavaScript: (script: string) => void;
+}
 
-    const sanitizedBase64 = useMemo(() => {
-        return base64.replace(/^data:application\/pdf;base64,/, '').replace(/\s/g, '');
-    }, [base64]);
+const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
+    ({ base64, bookId, onMessage, currentPage, searchTerm }, ref) => {
+        const webViewRef = useRef<any>(null);
 
-    const html = `
+        const sanitizedBase64 = useMemo(() => {
+            return base64
+                .replace(/^data:application\/pdf;base64,/, '')
+                .replace(/\s/g, '');
+        }, [base64]);
+
+        useImperativeHandle(ref, () => ({
+            injectJavaScript: (script: string) => {
+                webViewRef.current?.injectJavaScript(script);
+            },
+        }));
+
+        const html = `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css" />
   <style>
     html, body {
       margin: 0; padding: 0; height: 100%;
@@ -31,10 +51,21 @@ export default function PdfViewer({ base64, bookId, onMessage, currentPage }: Pd
       height: 100%;
       overflow-y: scroll;
       -webkit-overflow-scrolling: touch;
+      position: relative;
     }
     canvas {
       display: block;
       margin: 12px auto;
+    }
+    .textLayer {
+      font-family: sans-serif;
+      font-size: 1em;
+      line-height: 1;
+      position: absolute;
+      top: 0; left: 0;
+      right: 0; bottom: 0;
+      pointer-events: none;
+      z-index: 2;
     }
   </style>
 </head>
@@ -44,10 +75,20 @@ export default function PdfViewer({ base64, bookId, onMessage, currentPage }: Pd
     const pdfData = atob("${sanitizedBase64}");
     const viewer = document.getElementById("viewer");
     const startPage = ${currentPage ?? 1};
-
+    const searchTerm = ${JSON.stringify(searchTerm)};
+    
     let pageOffsets = [];
     let totalPages = 0;
     let renderedCount = 0;
+
+    const highlightText = (textLayerDiv, term) => {
+      const spans = textLayerDiv.querySelectorAll("span");
+      spans.forEach(span => {
+        if (span.textContent.toLowerCase().includes(term.toLowerCase())) {
+          span.style.backgroundColor = "yellow";
+        }
+      });
+    };
 
     pdfjsLib.getDocument({ data: pdfData }).promise.then(pdf => {
       totalPages = pdf.numPages;
@@ -64,17 +105,40 @@ export default function PdfViewer({ base64, bookId, onMessage, currentPage }: Pd
           canvas.height = viewport.height;
           canvas.width = viewport.width;
 
-          viewer.appendChild(canvas);
+          const wrapper = document.createElement("div");
+          wrapper.style.position = "relative";
+          wrapper.style.marginBottom = "16px";
+          wrapper.appendChild(canvas);
+          viewer.appendChild(wrapper);
+
           page.render({ canvasContext: context, viewport }).promise.then(() => {
-            pageOffsets[i - 1] = canvas.offsetTop;
+            pageOffsets[i - 1] = wrapper.offsetTop;
             renderedCount++;
 
-            // якщо всі сторінки відрендерені — скролим
+            page.getTextContent().then(textContent => {
+              const textLayerDiv = document.createElement("div");
+              textLayerDiv.className = "textLayer";
+              textLayerDiv.style.height = canvas.height + "px";
+              textLayerDiv.style.width = canvas.width + "px";
+              wrapper.appendChild(textLayerDiv);
+
+              pdfjsLib.renderTextLayer({
+                textContent,
+                container: textLayerDiv,
+                viewport,
+                textDivs: [],
+              }).promise.then(() => {
+                if (searchTerm) {
+                  highlightText(textLayerDiv, searchTerm);
+                }
+              });
+            });
+
             if (renderedCount === totalPages) {
               setTimeout(() => {
                 const offset = pageOffsets[startPage - 1] || 0;
                 viewer.scrollTop = offset;
-              }, 200); // невелика затримка для впевненості
+              }, 200);
             }
 
             if (i === 1) {
@@ -106,32 +170,45 @@ export default function PdfViewer({ base64, bookId, onMessage, currentPage }: Pd
           }
         }
       });
+
+      window.addEventListener("message", (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "scroll-to" && typeof data.index === "number") {
+            const offset = pageOffsets[data.index] || 0;
+            viewer.scrollTop = offset;
+          }
+        } catch {}
+      });
     });
   </script>
 </body>
 </html>
 `;
 
-    return (
-        <View style={{ flex: 1 }}>
-            <WebView
-                ref={webViewRef}
-                originWhitelist={['*']}
-                source={{ html }}
-                javaScriptEnabled
-                domStorageEnabled
-                style={{ flex: 1 }}
-                startInLoadingState
-                renderLoading={() => (
-                    <View style={styles.center}>
-                        <ActivityIndicator size="large" />
-                    </View>
-                )}
-                onMessage={onMessage}
-            />
-        </View>
-    );
-}
+        return (
+            <View style={{ flex: 1 }}>
+                <WebView
+                    ref={webViewRef}
+                    originWhitelist={['*']}
+                    source={{ html }}
+                    javaScriptEnabled
+                    domStorageEnabled
+                    style={{ flex: 1 }}
+                    startInLoadingState
+                    renderLoading={() => (
+                        <View style={styles.center}>
+                            <ActivityIndicator size="large" />
+                        </View>
+                    )}
+                    onMessage={onMessage}
+                />
+            </View>
+        );
+    }
+);
+
+export default PdfViewer;
 
 const styles = StyleSheet.create({
     center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
