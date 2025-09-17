@@ -1,5 +1,4 @@
 import React, { useRef, useState } from 'react';
-import { Modal } from 'react-native';
 import {
     View,
     Button,
@@ -8,18 +7,30 @@ import {
     TextInput,
     FlatList,
     Text,
-    TouchableOpacity
+    TouchableOpacity,
+    Modal
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { updateBookProgress } from '../utils/database';
+import { MaterialIcons } from '@expo/vector-icons';
+import {
+    addBookmark,
+    deleteBookmark,
+    isBookmarked,
+    updateBookProgress,
+} from '../utils/database';
 
 export default function EpubReader({ route }) {
     const { book } = route.params;
     const webViewRef = useRef(null);
 
-    const base64 = book.base64.replace(/^data:application\/epub\+zip;base64,/, '');
-    const currentPage = book.currentPage ?? 0;
+    const base64 = book.base64.replace(
+        /^data:application\/epub\+zip;base64,/,
+        ''
+    );
+    const savedPage = book.currentPage ?? 0;
 
+    const [currentPage, setCurrentPage] = useState(savedPage);
+    const [bookmarked, setBookmarked] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [showResults, setShowResults] = useState(false);
@@ -120,7 +131,6 @@ export default function EpubReader({ route }) {
     window.rendition = rendition;
     window.currentFontSize = 120;
 
-    // 🔍 Пошук
     window.searchInBook = async function(query) {
     window.ReactNativeWebView.postMessage(JSON.stringify({
         type: 'debug',
@@ -216,14 +226,15 @@ export default function EpubReader({ route }) {
         try {
             const parsed = JSON.parse(data);
 
-            if (parsed.type === 'debug') {
-                console.log('📥 DEBUG:', parsed.message);
-            }
-
             if (parsed.type === 'progress' || parsed.type === 'init') {
-                const { currentLocation: currentPage, totalLocations: totalPages } = parsed;
-                if (book?.id && currentPage) {
-                    await updateBookProgress(book.id, currentPage, totalPages);
+                const { currentLocation, totalLocations } = parsed;
+                setCurrentPage(currentLocation);
+
+                const exists = await isBookmarked(book.id, currentLocation);
+                setBookmarked(exists);
+
+                if (book?.id && currentLocation) {
+                    await updateBookProgress(book.id, currentLocation, totalLocations);
                 }
             }
 
@@ -236,12 +247,23 @@ export default function EpubReader({ route }) {
                     webViewRef.current?.injectJavaScript(`
             window.highlightSearchResults(${JSON.stringify(parsed.results)});
             true;
-        `);
+          `);
                 }
             }
-
         } catch (err) {
             console.error('❌ EPUB WebView parse error:', err);
+        }
+    };
+
+    const toggleBookmark = async () => {
+        if (bookmarked) {
+            await deleteBookmark(book.id, currentPage);
+            setBookmarked(false);
+            Alert.alert('Закладка', `Видалено сторінку ${currentPage}`);
+        } else {
+            await addBookmark(book.id, currentPage);
+            setBookmarked(true);
+            Alert.alert('Закладка', `Збережено сторінку ${currentPage}`);
         }
     };
 
@@ -255,6 +277,17 @@ export default function EpubReader({ route }) {
                 style={{ flex: 1 }}
                 onMessage={handleMessage}
             />
+
+            <TouchableOpacity
+                onPress={toggleBookmark}
+                style={styles.bookmarkButton}
+            >
+                <MaterialIcons
+                    name={bookmarked ? 'bookmark' : 'bookmark-border'}
+                    size={28}
+                    color="black"
+                />
+            </TouchableOpacity>
 
             <View style={styles.bottomPanel}>
                 <View style={styles.controls}>
@@ -409,5 +442,14 @@ const styles = StyleSheet.create({
         marginBottom: 4,
         fontSize: 14,
         color: '#555',
+    },
+    bookmarkButton: {
+        position: 'absolute',
+        top: 40,
+        right: 20,
+        backgroundColor: '#fff',
+        borderRadius: 30,
+        padding: 6,
+        elevation: 4,
     },
 });

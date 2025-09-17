@@ -17,6 +17,17 @@ export const initBookDB = async () => {
         );
     `);
 
+    await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS bookmarks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bookId INTEGER,
+            page INTEGER,
+            note TEXT,
+            createdAt TEXT
+            );
+        `);
+
+
     // Захист від дублювання колонок при оновленнях
     const safeAlter = async (column, type) => {
         try {
@@ -65,4 +76,34 @@ export const updateBookProgress = async (id, currentPage, totalPages) => {
 export const getBookById = async (id) => {
     const result = await db.getFirstAsync('SELECT * FROM books WHERE id = ?', [id]);
     return result;
+};
+
+export const addBookmark = async (bookId, page) => {
+    const createdAt = new Date().toISOString();
+    await db.runAsync(
+        'INSERT INTO bookmarks (bookId, page, createdAt) VALUES (?, ?, ?)',
+        [bookId, page, createdAt]
+    );
+};
+
+export const getBookmarksByBook = async (bookId) => {
+    return await db.getAllAsync(
+        'SELECT * FROM bookmarks WHERE bookId = ? ORDER BY createdAt DESC',
+        [bookId]
+    );
+};
+
+export const deleteBookmark = async (bookId, page) => {
+    await db.runAsync(
+        'DELETE FROM bookmarks WHERE bookId = ? AND page = ?',
+        [bookId, page]
+    );
+};
+
+export const isBookmarked = async (bookId, page) => {
+    const res = await db.getFirstAsync(
+        'SELECT * FROM bookmarks WHERE bookId = ? AND page = ?',
+        [bookId, page]
+    );
+    return !!res;
 };
