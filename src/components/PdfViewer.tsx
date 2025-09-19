@@ -20,7 +20,7 @@ export interface PdfViewerHandle {
 }
 
 const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
-    ({ base64, bookId, onMessage, currentPage, searchTerm }, ref) => {
+    ({ base64, onMessage, currentPage, searchTerm }, ref) => {
         const webViewRef = useRef<any>(null);
 
         const sanitizedBase64 = useMemo(() => {
@@ -60,7 +60,7 @@ const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
     .textLayer {
       font-family: sans-serif;
       font-size: 1em;
-      line-height: 1;
+      line-height: 1.4;
       position: absolute;
       top: 0; left: 0;
       right: 0; bottom: 0;
@@ -80,6 +80,7 @@ const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
     let pageOffsets = [];
     let totalPages = 0;
     let renderedCount = 0;
+    let globalScale = 1;
 
     const highlightText = (textLayerDiv, term) => {
       const spans = textLayerDiv.querySelectorAll("span");
@@ -90,70 +91,71 @@ const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
       });
     };
 
-    pdfjsLib.getDocument({ data: pdfData }).promise.then(pdf => {
+    const renderPage = (i, scale = 1) => {
+      pdf.getPage(i).then(page => {
+        const unscaled = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: (window.innerWidth / unscaled.width) * scale });
+
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        const wrapper = document.createElement("div");
+        wrapper.style.position = "relative";
+        wrapper.style.marginBottom = "16px";
+        wrapper.appendChild(canvas);
+        viewer.appendChild(wrapper);
+
+        page.render({ canvasContext: context, viewport }).promise.then(() => {
+          pageOffsets[i - 1] = wrapper.offsetTop;
+          renderedCount++;
+
+          page.getTextContent().then(textContent => {
+            const textLayerDiv = document.createElement("div");
+            textLayerDiv.className = "textLayer";
+            textLayerDiv.style.height = canvas.height + "px";
+            textLayerDiv.style.width = canvas.width + "px";
+            wrapper.appendChild(textLayerDiv);
+
+            pdfjsLib.renderTextLayer({
+              textContent,
+              container: textLayerDiv,
+              viewport,
+              textDivs: [],
+            }).promise.then(() => {
+              if (searchTerm) {
+                highlightText(textLayerDiv, searchTerm);
+              }
+            });
+          });
+
+          if (renderedCount === totalPages) {
+            setTimeout(() => {
+              const offset = pageOffsets[startPage - 1] || 0;
+              viewer.scrollTop = offset;
+            }, 200);
+          }
+
+          if (i === 1) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              type: 'init',
+              currentPage: 1,
+              totalPages
+            }));
+          }
+        });
+      });
+    };
+
+    let pdf;
+    pdfjsLib.getDocument({ data: pdfData }).promise.then(doc => {
+      pdf = doc;
       totalPages = pdf.numPages;
 
-      const renderPage = (i) => {
-        pdf.getPage(i).then(page => {
-          const unscaled = page.getViewport({ scale: 1 });
-          const scale = window.innerWidth / unscaled.width;
-          const viewport = page.getViewport({ scale });
-
-          const canvas = document.createElement("canvas");
-          const context = canvas.getContext("2d");
-
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
-
-          const wrapper = document.createElement("div");
-          wrapper.style.position = "relative";
-          wrapper.style.marginBottom = "16px";
-          wrapper.appendChild(canvas);
-          viewer.appendChild(wrapper);
-
-          page.render({ canvasContext: context, viewport }).promise.then(() => {
-            pageOffsets[i - 1] = wrapper.offsetTop;
-            renderedCount++;
-
-            page.getTextContent().then(textContent => {
-              const textLayerDiv = document.createElement("div");
-              textLayerDiv.className = "textLayer";
-              textLayerDiv.style.height = canvas.height + "px";
-              textLayerDiv.style.width = canvas.width + "px";
-              wrapper.appendChild(textLayerDiv);
-
-              pdfjsLib.renderTextLayer({
-                textContent,
-                container: textLayerDiv,
-                viewport,
-                textDivs: [],
-              }).promise.then(() => {
-                if (searchTerm) {
-                  highlightText(textLayerDiv, searchTerm);
-                }
-              });
-            });
-
-            if (renderedCount === totalPages) {
-              setTimeout(() => {
-                const offset = pageOffsets[startPage - 1] || 0;
-                viewer.scrollTop = offset;
-              }, 200);
-            }
-
-            if (i === 1) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'init',
-                currentPage: 1,
-                totalPages
-              }));
-            }
-          });
-        });
-      };
-
       for (let i = 1; i <= totalPages; i++) {
-        renderPage(i);
+        renderPage(i, globalScale);
       }
 
       viewer.addEventListener('scroll', () => {
@@ -170,17 +172,34 @@ const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
           }
         }
       });
-
-      window.addEventListener("message", (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "scroll-to" && typeof data.index === "number") {
-            const offset = pageOffsets[data.index] || 0;
-            viewer.scrollTop = offset;
-          }
-        } catch {}
-      });
     });
+
+    window.changeTheme = function(theme) {
+      if (theme === "dark") {
+        viewer.style.background = "#1c1c1c";
+        document.body.style.filter = "invert(1) hue-rotate(180deg)";
+      } else if (theme === "sepia") {
+        viewer.style.background = "#f5ecd9";
+        document.body.style.filter = "none";
+      } else {
+        viewer.style.background = "#fff";
+        document.body.style.filter = "none";
+      }
+    };
+
+    window.changeZoom = function(scale) {
+      globalScale = scale;
+      viewer.innerHTML = "";
+      renderedCount = 0;
+      for (let i = 1; i <= totalPages; i++) {
+        renderPage(i, globalScale);
+      }
+    };
+
+    window.changeLineHeight = function(lh) {
+      const spans = document.querySelectorAll('.textLayer span');
+      spans.forEach(s => { s.style.lineHeight = lh; });
+    };
   </script>
 </body>
 </html>

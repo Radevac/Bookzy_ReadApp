@@ -15,6 +15,7 @@ import {
     updateBookProgress,
 } from '../utils/database';
 import { MaterialIcons } from '@expo/vector-icons';
+import ReadingSettingsScreen from './ReadingSettingsScreen';
 
 export default function ReaderScreen({ route }) {
     const { book } = route.params;
@@ -22,6 +23,14 @@ export default function ReaderScreen({ route }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(book.currentPage ?? 0);
     const [bookmarked, setBookmarked] = useState(false);
+
+    // ⚙️ стан налаштувань
+    const [settingsVisible, setSettingsVisible] = useState(false);
+    const [readerSettings, setReaderSettings] = useState({
+        theme: 'light',
+        fontSize: 16,
+        lineHeight: 1.6,
+    });
 
     useEffect(() => {
         (async () => {
@@ -85,12 +94,20 @@ export default function ReaderScreen({ route }) {
 
     return (
         <View style={{ flex: 1 }}>
+
             <TouchableOpacity onPress={toggleBookmark} style={styles.bookmarkButton}>
                 <MaterialIcons
                     name={bookmarked ? 'bookmark' : 'bookmark-border'}
                     size={28}
                     color="black"
                 />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+                onPress={() => setSettingsVisible(true)}
+                style={styles.settingsButton}
+            >
+                <MaterialIcons name="settings" size={28} color="black" />
             </TouchableOpacity>
 
             <View style={styles.searchContainer}>
@@ -115,6 +132,31 @@ export default function ReaderScreen({ route }) {
                 currentPage={book.currentPage}
                 onMessage={handleMessage}
                 searchTerm={searchTerm}
+            />
+
+            <ReadingSettingsScreen
+                visible={settingsVisible}
+                onClose={() => setSettingsVisible(false)}
+                settings={readerSettings}
+                onApply={(newSettings) => {
+                    setReaderSettings(newSettings);
+
+                    viewerRef.current?.injectJavaScript(`
+      window.changeTheme("${newSettings.theme}");
+      true;
+    `);
+
+                    const scale = newSettings.fontSize / 16;
+                    viewerRef.current?.injectJavaScript(`
+      window.changeZoom(${scale});
+      true;
+    `);
+
+                    viewerRef.current?.injectJavaScript(`
+      window.changeLineHeight("${newSettings.lineHeight}");
+      true;
+    `);
+                }}
             />
         </View>
     );
@@ -152,6 +194,16 @@ const styles = StyleSheet.create({
         position: 'absolute',
         top: 40,
         right: 20,
+        backgroundColor: '#fff',
+        borderRadius: 30,
+        padding: 6,
+        elevation: 4,
+        zIndex: 10,
+    },
+    settingsButton: {
+        position: 'absolute',
+        top: 40,
+        left: 20,
         backgroundColor: '#fff',
         borderRadius: 30,
         padding: 6,

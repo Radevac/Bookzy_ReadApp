@@ -19,6 +19,9 @@ import {
     updateBookProgress,
 } from '../utils/database';
 
+import ReadingSettingsScreen from './ReadingSettingsScreen';
+
+
 export default function EpubReader({ route }) {
     const { book } = route.params;
     const webViewRef = useRef(null);
@@ -34,6 +37,12 @@ export default function EpubReader({ route }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [showResults, setShowResults] = useState(false);
+    const [settingsVisible, setSettingsVisible] = useState(false);
+    const [readerSettings, setReaderSettings] = useState({
+        theme: 'light',
+        fontSize: 16,
+        lineHeight: 1.6,
+    });
 
     const html = `
 <!DOCTYPE html>
@@ -288,6 +297,21 @@ export default function EpubReader({ route }) {
                     color="black"
                 />
             </TouchableOpacity>
+            <TouchableOpacity
+                onPress={() => setSettingsVisible(true)}
+                style={{
+                    position: 'absolute',
+                    top: 40,
+                    left: 20,
+                    backgroundColor: '#fff',
+                    borderRadius: 30,
+                    padding: 6,
+                    elevation: 4,
+                    zIndex: 10,
+                }}
+            >
+                <MaterialIcons name="settings" size={28} color="black" />
+            </TouchableOpacity>
 
             <View style={styles.bottomPanel}>
                 <View style={styles.controls}>
@@ -395,8 +419,29 @@ export default function EpubReader({ route }) {
                             );
                         }}
                     />
+
                 </View>
             </Modal>
+            <ReadingSettingsScreen
+                visible={settingsVisible}
+                onClose={() => setSettingsVisible(false)}
+                settings={readerSettings}
+                onApply={(newSettings) => {
+                    setReaderSettings(newSettings);
+
+                    webViewRef.current?.injectJavaScript(`
+      window.rendition.themes.default({
+        body: {
+          'background': '${newSettings.theme === 'dark' ? '#1c1c1c' : newSettings.theme === 'sepia' ? '#f5ecd9' : '#fff'}',
+          'color': '${newSettings.theme === 'dark' ? '#fff' : '#000'}',
+          'font-size': '${newSettings.fontSize}px',
+          'line-height': '${newSettings.lineHeight}',
+        }
+      });
+      true;
+    `);
+                }}
+            />
         </View>
     );
 }
