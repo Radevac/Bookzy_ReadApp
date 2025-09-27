@@ -27,27 +27,40 @@ export const initBookDB = async () => {
             );
         `);
 
+    await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            book_id INTEGER,
+            page INTEGER,
+            text TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
 
     // Захист від дублювання колонок при оновленнях
-    const safeAlter = async (column, type) => {
+    const safeAlter = async (table, column, type) => {
         try {
-            await db.execAsync(`ALTER TABLE books ADD COLUMN ${column} ${type}`);
-            console.log(`✅ Додано колонку "${column}"`);
+            await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+            console.log(`✅ Додано колонку "${column}" в "${table}"`);
         } catch (e) {
             if (
-                e.message.includes('duplicate column name') ||
-                e.message.includes('already exists')
+                e.message.includes("duplicate column name") ||
+                e.message.includes("already exists")
             ) {
-                console.log(`ℹ️ Колонка "${column}" вже існує`);
+                console.log(`ℹ️ Колонка "${column}" вже існує в "${table}"`);
             } else {
-                console.error(`❌ Помилка при додаванні "${column}":`, e);
+                console.error(`❌ Помилка при додаванні "${column}" в "${table}":`, e);
             }
         }
     };
 
-    await safeAlter('base64', 'TEXT');
-    await safeAlter('currentPage', 'INTEGER');
-    await safeAlter('totalPages', 'INTEGER');
+    await safeAlter("books", "base64", "TEXT");
+    await safeAlter("books", "currentPage", "INTEGER");
+    await safeAlter("books", "totalPages", "INTEGER");
+
+
+    await safeAlter("bookmarks", "preview", "TEXT");
 };
 
 export const insertBook = async (title, path, format = 'pdf', base64 = '') => {
@@ -78,14 +91,13 @@ export const getBookById = async (id) => {
     return result;
 };
 
-export const addBookmark = async (bookId, page) => {
+export const addBookmark = async (bookId, page, preview) => {
     const createdAt = new Date().toISOString();
     await db.runAsync(
-        'INSERT INTO bookmarks (bookId, page, createdAt) VALUES (?, ?, ?)',
-        [bookId, page, createdAt]
+        'INSERT INTO bookmarks (bookId, page, createdAt, preview) VALUES (?, ?, ?, ?)',
+        [bookId, page, createdAt, preview]
     );
 };
-
 export const getBookmarksByBook = async (bookId) => {
     return await db.getAllAsync(
         'SELECT * FROM bookmarks WHERE bookId = ? ORDER BY createdAt DESC',
@@ -106,4 +118,19 @@ export const isBookmarked = async (bookId, page) => {
         [bookId, page]
     );
     return !!res;
+};
+
+export const addNote = async (bookId, page, text, p0) => {
+    await db.runAsync(
+        "INSERT INTO notes (book_id, page, text) VALUES (?, ?, ?)",
+        [bookId, page, text]
+    );
+};
+
+export const getNotes = async (bookId) => {
+    return await db.getAllAsync("SELECT * FROM notes WHERE book_id = ?", [bookId]);
+};
+
+export const deleteNote = async (id) => {
+    await db.runAsync("DELETE FROM notes WHERE id = ?", [id]);
 };

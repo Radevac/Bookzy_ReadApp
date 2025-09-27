@@ -10,12 +10,13 @@ import {
 import PdfViewer, { PdfViewerHandle } from '../components/PdfViewer';
 import {
     addBookmark,
-    deleteBookmark,
+    deleteBookmark, getBookmarksByBook,
     isBookmarked,
     updateBookProgress,
 } from '../utils/database';
 import { MaterialIcons } from '@expo/vector-icons';
 import ReadingSettingsScreen from './ReadingSettingsScreen';
+import BookmarkNotesModal from "../components/BookmarkNotesModal";
 
 export default function ReaderScreen({ route }) {
     const { book } = route.params;
@@ -23,8 +24,14 @@ export default function ReaderScreen({ route }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(book.currentPage ?? 0);
     const [bookmarked, setBookmarked] = useState(false);
+    const [notesModalVisible, setNotesModalVisible] = useState(false);
+    const [bookmarks, setBookmarks] = useState([]);
+    const [chapters, setChapters] = useState([]);
+    const [totalPages, setTotalPages] = useState<number>(0);
 
-    // ⚙️ стан налаштувань
+    const [lastPreview, setLastPreview] = useState<string>("");
+    const previewResolver = useRef<((text: string) => void) | null>(null);
+
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [readerSettings, setReaderSettings] = useState({
         theme: 'light',
@@ -41,12 +48,60 @@ export default function ReaderScreen({ route }) {
         })();
     }, [currentPage]);
 
+    useEffect(() => {
+        (async () => {
+            if (book?.id) {
+                const bmarks = await getBookmarksByBook(book.id);
+                setBookmarks(bmarks);
+            }
+        })();
+    }, [notesModalVisible]);
+
+    const getPdfPreview = (): Promise<string> => {
+        return new Promise((resolve) => {
+            previewResolver.current = resolve;
+            viewerRef.current?.injectJavaScript(`
+      (function() {
+        try {
+          var text = "";
+          var spans = document.querySelectorAll('.textLayer span');
+          for (var i = 0; i < spans.length; i++) {
+            text += spans[i].innerText + " ";
+          }
+          var firstSentence = (text || "").trim().split(/[.!?…]\\s/)[0].slice(0, 160);
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: "preview",
+            text: firstSentence
+          }));
+        } catch (e) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: "preview",
+            text: ""
+          }));
+        }
+      })();
+      true;
+    `);
+        });
+    };
+
     const handleMessage = async (event) => {
         try {
-            const data = JSON.parse(event.nativeEvent.data);
-            if (data.type === 'progress' || data.type === 'init') {
-                const { currentPage: page = 0, totalPages = 1 } = data;
+            const parsed = JSON.parse(event.nativeEvent.data);
+
+            if (parsed.type === "preview") {
+                setLastPreview(parsed.text);
+                if (previewResolver.current) {
+                    previewResolver.current(parsed.text);
+                    previewResolver.current = null;
+                }
+                return;
+            }
+
+            if (parsed.type === "progress" || parsed.type === "init") {
+                const { currentPage: page = 0, totalPages = 1 } = parsed;
                 setCurrentPage(page);
+                setTotalPages(totalPages);
 
                 if (book?.id) {
                     await updateBookProgress(book.id, page, totalPages);
@@ -54,7 +109,7 @@ export default function ReaderScreen({ route }) {
                 console.log(`📖 Прогрес: ${page} з ${totalPages}`);
             }
         } catch (e) {
-            console.error('❌ WebView message parse error:', e);
+            console.error("❌ WebView message parse error:", e);
         }
     };
 
@@ -71,17 +126,16 @@ export default function ReaderScreen({ route }) {
     };
 
     const toggleBookmark = async () => {
-        if (!book?.id) return;
-
         if (bookmarked) {
             await deleteBookmark(book.id, currentPage);
             setBookmarked(false);
-            Alert.alert('Закладка', `Видалено сторінку ${currentPage}`);
         } else {
-            await addBookmark(book.id, currentPage);
+            const preview = await getPdfPreview();
+            await addBookmark(book.id, currentPage, preview || "…");
             setBookmarked(true);
-            Alert.alert('Закладка', `Збережено сторінку ${currentPage}`);
         }
+        const bmarks = await getBookmarksByBook(book.id);
+        setBookmarks(bmarks);
     };
 
     if (!book?.base64) {
@@ -102,7 +156,21 @@ export default function ReaderScreen({ route }) {
                     color="black"
                 />
             </TouchableOpacity>
-
+            <TouchableOpacity
+                onPress={() => setNotesModalVisible(true)}
+                style={{
+                    position: "absolute",
+                    top: 40,
+                    left: 70,
+                    backgroundColor: "#fff",
+                    borderRadius: 30,
+                    padding: 6,
+                    elevation: 4,
+                    zIndex: 10,
+                }}
+            >
+                <MaterialIcons name="list" size={28} color="black" />
+            </TouchableOpacity>
             <TouchableOpacity
                 onPress={() => setSettingsVisible(true)}
                 style={styles.settingsButton}
@@ -132,6 +200,27 @@ export default function ReaderScreen({ route }) {
                 currentPage={book.currentPage}
                 onMessage={handleMessage}
                 searchTerm={searchTerm}
+            />
+            <BookmarkNotesModal
+                visible={notesModalVisible}
+                onClose={() => setNotesModalVisible(false)}
+                chapters={Array.from({ length: totalPages }).map((_, i) => ({
+                    label: `Сторінка ${i + 1}`,
+                    href: i + 1,
+                }))}
+                bookmarks={bookmarks}
+                onSelectChapter={(page) => {
+                    viewerRef.current?.injectJavaScript(`
+      document.getElementById("viewer").scrollTop = pageOffsets[Number(${page}) - 1] || 0;
+      true;
+    `);
+                    setNotesModalVisible(false);
+                }}
+                onDeleteBookmark={async (page) => {
+                    await deleteBookmark(book.id, page);
+                    const bmarks = await getBookmarksByBook(book.id);
+                    setBookmarks(bmarks);
+                }}
             />
 
             <ReadingSettingsScreen

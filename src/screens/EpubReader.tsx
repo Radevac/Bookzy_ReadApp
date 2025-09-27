@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
     View,
     Button,
@@ -14,12 +14,13 @@ import { WebView } from 'react-native-webview';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
     addBookmark,
-    deleteBookmark,
+    deleteBookmark, getBookmarksByBook, getNotes,
     isBookmarked,
     updateBookProgress,
 } from '../utils/database';
 
 import ReadingSettingsScreen from './ReadingSettingsScreen';
+import BookmarkNotesModal from "../components/BookmarkNotesModal";
 
 
 export default function EpubReader({ route }) {
@@ -38,11 +39,80 @@ export default function EpubReader({ route }) {
     const [searchResults, setSearchResults] = useState([]);
     const [showResults, setShowResults] = useState(false);
     const [settingsVisible, setSettingsVisible] = useState(false);
+
+    const [bookmarks, setBookmarks] = useState([]);
+    const [notes, setNotes] = useState([]);
+    const [chapters, setChapters] = useState([]);
+    const [notesModalVisible, setNotesModalVisible] = useState(false);
+
+    const [lastPreview, setLastPreview] = useState<string>("");
+
     const [readerSettings, setReaderSettings] = useState({
         theme: 'light',
         fontSize: 16,
         lineHeight: 1.6,
     });
+
+    const loadBookmarksAndNotes = async () => {
+        const bmarks = await getBookmarksByBook(book.id);
+        const nts = await getNotes(book.id);
+        setBookmarks(bmarks);
+        setNotes(nts);
+    };
+
+    useEffect(() => {
+        if (notesModalVisible) {
+            loadBookmarksAndNotes();
+        }
+    }, [notesModalVisible]);
+
+    const previewResolver = useRef<((text: string) => void) | null>(null);
+
+    const getEpubPreview = (): Promise<string> => {
+        return new Promise((resolve) => {
+            previewResolver.current = resolve;
+            webViewRef.current?.injectJavaScript(`
+      (function () {
+        try {
+          var text = "";
+
+          // 1) нормальний шлях через ePub.js
+          if (window.rendition && window.rendition.getContents) {
+            var cs = window.rendition.getContents();
+            for (var i = 0; i < cs.length; i++) {
+              var doc = cs[i].document;
+              if (doc && doc.body) {
+                text += " " + (doc.body.innerText || "");
+              }
+            }
+          }
+
+          // 2) запасний варіант напряму через iframe усередині #viewer
+          if (!text) {
+            var ifr = document.querySelector('#viewer iframe');
+            if (ifr && ifr.contentDocument && ifr.contentDocument.body) {
+              text = ifr.contentDocument.body.innerText || "";
+            }
+          }
+
+          text = (text || "").trim();
+          var firstSentence = text.split(/[.!?…]\\s/)[0].slice(0, 160);
+
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: "preview",
+            text: firstSentence
+          }));
+        } catch (e) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: "preview",
+            text: ""
+          }));
+        }
+      })();
+      true;
+    `);
+        });
+    };
 
     const html = `
 <!DOCTYPE html>
@@ -52,12 +122,17 @@ export default function EpubReader({ route }) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://unpkg.com/epubjs/dist/epub.min.js"></script>
     <style>
-        html, body {
-            margin: 0; padding: 0; height: 100%; background: white;
-        }
-        #viewer {
-            height: 100%;
-        }
+        html, body, #viewer, iframe, .epub-container {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      background: #fff !important;
+    }
+    #viewer {
+      overflow-y: auto;  
+      -webkit-overflow-scrolling: touch;
+    }
     </style>
 </head>
 <body>
@@ -77,20 +152,24 @@ export default function EpubReader({ route }) {
 
     const blob = new Blob([bytes], { type: "application/epub+zip" });
     const book = ePub(blob);
+    
     const rendition = book.renderTo("viewer", {
-        width: "100%",
-        height: "100%",
-        spread: "none"
+         width: "100%",
+  height: "100%",
+    flow: "scrolled-doc", 
+  spread: "none",
+  manager: "continuous"
     });
 
     rendition.themes.default({
         body: {
-            "font-size": "120%",
-            "line-height": "1.6",
-            "text-align": "justify",
-            "padding": "1em",
-            "margin": "0 auto",
-            "max-width": "95%",
+              "background": "#fff !important",
+    "color": "#000 !important",
+    "font-size": "120%",
+    "line-height": "1.6",
+    "text-align": "justify",
+    "margin": "0 auto",
+    "max-width": "95%",
         },
         img: {
             "max-width": "100%",
@@ -109,32 +188,46 @@ export default function EpubReader({ route }) {
     const savedLocation = ${currentPage};
 
     book.ready.then(() => {
-        return book.locations.generate(1600);
-    }).then(() => {
-        totalLocations = book.locations.length();
+    return Promise.all([
+        book.locations.generate(1600),
+        book.loaded.navigation
+    ]);
+}).then(([_, navigation]) => {
+    totalLocations = book.locations.length();
 
-        if (savedLocation > 0 && totalLocations > 0) {
-            const cfi = book.locations.cfiFromLocation(savedLocation);
-            rendition.display(cfi);
-        } else {
-            rendition.display();
+    if (navigation && navigation.toc) {
+        const toc = navigation.toc.map(item => ({
+            label: item.label,
+            href: item.href
+        }));
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'toc', toc }));
+    }
+
+    if (savedLocation > 0 && totalLocations > 0) {
+  const cfi = book.locations.cfiFromLocation(savedLocation);
+  rendition.display(cfi).catch(() => rendition.display());
+}
+
+    rendition.on("relocated", (location) => {
+        try {
+            currentLocation = book.locations.locationFromCfi(location.start.cfi);
+        } catch (e) {
+            currentLocation = 0;
         }
 
-        rendition.on("relocated", (location) => {
-            currentLocation = book.locations.locationFromCfi(location.start.cfi);
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'progress',
-                currentLocation,
-                totalLocations
-            }));
-        });
-
         window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'init',
-            currentLocation: savedLocation,
+            type: 'progress',
+            currentLocation,
             totalLocations
         }));
     });
+
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'init',
+        currentLocation: savedLocation,
+        totalLocations
+    }));
+});
 
     window.book = book;
     window.rendition = rendition;
@@ -235,6 +328,16 @@ export default function EpubReader({ route }) {
         try {
             const parsed = JSON.parse(data);
 
+            if (parsed.type === 'preview') {
+                setLastPreview(parsed.text);
+                if (previewResolver.current) {
+                    previewResolver.current(parsed.text);
+                    previewResolver.current = null;
+                }
+                return;
+            }
+
+
             if (parsed.type === 'progress' || parsed.type === 'init') {
                 const { currentLocation, totalLocations } = parsed;
                 setCurrentPage(currentLocation);
@@ -259,6 +362,9 @@ export default function EpubReader({ route }) {
           `);
                 }
             }
+            if (parsed.type === 'toc') {
+                setChapters(parsed.toc);
+            }
         } catch (err) {
             console.error('❌ EPUB WebView parse error:', err);
         }
@@ -268,12 +374,12 @@ export default function EpubReader({ route }) {
         if (bookmarked) {
             await deleteBookmark(book.id, currentPage);
             setBookmarked(false);
-            Alert.alert('Закладка', `Видалено сторінку ${currentPage}`);
         } else {
-            await addBookmark(book.id, currentPage);
+            const preview = await getEpubPreview();
+            await addBookmark(book.id, currentPage, preview || "…");
             setBookmarked(true);
-            Alert.alert('Закладка', `Збережено сторінку ${currentPage}`);
         }
+        await loadBookmarksAndNotes();
     };
 
     return (
@@ -298,6 +404,37 @@ export default function EpubReader({ route }) {
                 />
             </TouchableOpacity>
             <TouchableOpacity
+                onPress={() => setNotesModalVisible(true)}
+                style={{
+                    position: "absolute",
+                    top: 40,
+                    left: 70,
+                    backgroundColor: "#fff",
+                    borderRadius: 30,
+                    padding: 6,
+                    elevation: 4,
+                }}
+            >
+                <MaterialIcons name="list" size={28} color="black" />
+            </TouchableOpacity>
+
+            <BookmarkNotesModal
+                visible={notesModalVisible}
+                onClose={() => setNotesModalVisible(false)}
+                chapters={chapters}
+                bookmarks={bookmarks}
+                onSelectChapter={(href) => {
+                    webViewRef.current?.injectJavaScript(`
+            window.rendition.display(${JSON.stringify(href)});
+            true;
+        `);
+                }}
+                onDeleteBookmark={async (page) => {
+                    await deleteBookmark(book.id, page);
+                    await loadBookmarksAndNotes();
+                }}
+            />
+            <TouchableOpacity
                 onPress={() => setSettingsVisible(true)}
                 style={{
                     position: 'absolute',
@@ -314,12 +451,6 @@ export default function EpubReader({ route }) {
             </TouchableOpacity>
 
             <View style={styles.bottomPanel}>
-                <View style={styles.controls}>
-                    <Button title="⬅️ Назад" onPress={() => sendCommand('window.rendition.prev()')} />
-                    <Button title="➡️ Вперед" onPress={() => sendCommand('window.rendition.next()')} />
-                    <Button title="🔎+" onPress={() => sendCommand('window.currentFontSize += 20; window.rendition.themes.fontSize(window.currentFontSize + "%")')} />
-                    <Button title="🔎−" onPress={() => sendCommand('window.currentFontSize = Math.max(80, window.currentFontSize - 20); window.rendition.themes.fontSize(window.currentFontSize + "%")')} />
-                </View>
                 <View style={styles.searchBar}>
                     <TextInput
                         value={searchQuery}
@@ -340,35 +471,6 @@ export default function EpubReader({ route }) {
                 </View>
             </View>
 
-            <FlatList
-                data={searchResults}
-                keyExtractor={(item, index) => index.toString()}
-                renderItem={({ item, index }) => {
-                    const highlighted = item.excerpt.replace(
-                        new RegExp(searchQuery, 'gi'),
-                        match => `<mark>${match}</mark>`
-                    );
-                    return (
-                        <TouchableOpacity
-                            onPress={() => {
-                                webViewRef.current?.injectJavaScript(`
-                                    window.rendition.display(${JSON.stringify(item.cfi)});
-                                    true;
-                                `);
-                            }}
-                            style={styles.resultContainer}
-                        >
-                            <Text style={styles.resultIndex}>Результат №{index + 1}</Text>
-                            <WebView
-                                originWhitelist={['*']}
-                                source={{ html: `<div style="padding:8px;font-size:16px;">${highlighted}</div>` }}
-                                style={{ height: 60 }}
-                                scrollEnabled={false}
-                            />
-                        </TouchableOpacity>
-                    );
-                }}
-            />
             <Modal visible={showResults} animationType="slide">
                 <View style={{ flex: 1, backgroundColor: '#fff' }}>
                     <View style={{

@@ -23,7 +23,7 @@ export default function ReadingSettingsScreen({ visible, onClose, onApply, setti
         <Modal visible={visible} animationType="slide" transparent>
             <View style={styles.overlay}>
                 <View style={styles.content}>
-                    <Text style={styles.title}>Налаштування читання</Text>
+                    <Text style={styles.title}>Налаштування </Text>
 
                     <Text style={styles.label}>Тема</Text>
                     <View style={styles.row}>
