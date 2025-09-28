@@ -10,13 +10,19 @@ import {
 import PdfViewer, { PdfViewerHandle } from '../components/PdfViewer';
 import {
     addBookmark,
-    deleteBookmark, getBookmarksByBook,
+    deleteBookmark, getBookmarksByBook, getCommentsByBook,
     isBookmarked,
     updateBookProgress,
 } from '../utils/database';
 import { MaterialIcons } from '@expo/vector-icons';
 import ReadingSettingsScreen from './ReadingSettingsScreen';
 import BookmarkNotesModal from "../components/BookmarkNotesModal";
+import TextSelectionModal from "../components/TextSelectionModal";
+import * as Clipboard from "expo-clipboard";
+import CommentModal from "../components/CommentModal";
+import { addComment } from "../utils/database";
+import CommentInputModal from "../components/CommentInputModal";
+
 
 export default function ReaderScreen({ route }) {
     const { book } = route.params;
@@ -31,6 +37,13 @@ export default function ReaderScreen({ route }) {
 
     const [lastPreview, setLastPreview] = useState<string>("");
     const previewResolver = useRef<((text: string) => void) | null>(null);
+
+    const [selectedText, setSelectedText] = useState<string | null>(null);
+    const [selectionModalVisible, setSelectionModalVisible] = useState(false);
+    const [commentModalVisible, setCommentModalVisible] = useState(false);
+    const [comments, setComments] = useState<any[]>([]);
+    const [highlights, setHighlights] = useState<any[]>([]);
+
 
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [readerSettings, setReaderSettings] = useState({
@@ -56,6 +69,18 @@ export default function ReaderScreen({ route }) {
             }
         })();
     }, [notesModalVisible]);
+
+    useEffect(() => {
+        (async () => {
+            if (book?.id) {
+                const bmarks = await getBookmarksByBook(book.id);
+                const comms = await getCommentsByBook(book.id);
+
+                setBookmarks(bmarks);
+                setComments(comms);
+            }
+        })();
+    }, [notesModalVisible, commentModalVisible]);
 
     const getPdfPreview = (): Promise<string> => {
         return new Promise((resolve) => {
@@ -95,6 +120,12 @@ export default function ReaderScreen({ route }) {
                     previewResolver.current(parsed.text);
                     previewResolver.current = null;
                 }
+                return;
+            }
+
+            if (parsed.type === "text-selected") {
+                setSelectedText(parsed.text);
+                setSelectionModalVisible(true);
                 return;
             }
 
@@ -209,6 +240,8 @@ export default function ReaderScreen({ route }) {
                     href: i + 1,
                 }))}
                 bookmarks={bookmarks}
+                comments={comments}
+                highlights={highlights} // поки пустий масив, потім реалізуємо
                 onSelectChapter={(page) => {
                     viewerRef.current?.injectJavaScript(`
       document.getElementById("viewer").scrollTop = pageOffsets[Number(${page}) - 1] || 0;
@@ -220,6 +253,50 @@ export default function ReaderScreen({ route }) {
                     await deleteBookmark(book.id, page);
                     const bmarks = await getBookmarksByBook(book.id);
                     setBookmarks(bmarks);
+                }}
+            />
+            <TextSelectionModal
+                visible={selectionModalVisible}
+                onClose={() => setSelectionModalVisible(false)}
+                onAddComment={() => {
+                    setSelectionModalVisible(false);
+                    setCommentModalVisible(true);
+                }}
+                onHighlight={(color) => {
+                    Alert.alert("🔖 Виділено колір: " + color);
+                }}
+                onCopy={() => {
+                    if (selectedText) {
+                        Clipboard.setStringAsync(selectedText);
+                        Alert.alert("Скопійовано!");
+                    }
+                }}
+                onDelete={() => {
+                    Alert.alert("❌ Видалити виділення");
+                }}
+            />
+            <CommentModal
+                visible={commentModalVisible}
+                onClose={() => setCommentModalVisible(false)}
+                onSave={async (text) => {
+                    if (book?.id) {
+                        await addComment(book.id, currentPage, selectedText || "", text);
+                        setCommentModalVisible(false);
+                        const bmarks = await getBookmarksByBook(book.id);
+                        setBookmarks(bmarks);
+                    }
+                }}
+            />
+            <CommentInputModal
+                visible={commentModalVisible}
+                onClose={() => setCommentModalVisible(false)}
+                onSave={async (text) => {
+                    await addComment(book.id, currentPage, selectedText, text);
+
+                    const updated = await getCommentsByBook(book.id);
+                    setComments(updated);
+
+                    setCommentModalVisible(false);
                 }}
             />
 
@@ -249,6 +326,7 @@ export default function ReaderScreen({ route }) {
             />
         </View>
     );
+
 }
 
 const styles = StyleSheet.create({

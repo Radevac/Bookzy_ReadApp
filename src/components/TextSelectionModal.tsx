@@ -2,16 +2,21 @@ import React from "react";
 import {
     Modal,
     View,
-    Text,
     TouchableOpacity,
     StyleSheet,
+    Image,
+    TouchableWithoutFeedback,
 } from "react-native";
-import { MaterialIcons } from "@expo/vector-icons";
+
+const translateIcon = require("../ assets/img/Translate.png");
+const underlineIcon = require("../ assets/img/Ico.png");
+const copyIcon = require("../ assets/img/Copy.png");
+const commentIcon = require("../ assets/img/Comment.png");
+const colorWheelIcon = require("../ assets/img/Color_RGB.png");
 
 interface Props {
     visible: boolean;
     onClose: () => void;
-    text: string | null;
     onAddComment: () => void;
     onHighlight: (color: string) => void;
     onCopy: () => void;
@@ -21,50 +26,48 @@ interface Props {
 export default function TextSelectionModal({
                                                visible,
                                                onClose,
-                                               text,
                                                onAddComment,
                                                onHighlight,
                                                onCopy,
                                                onDelete,
                                            }: Props) {
-    if (!text) return null;
-
     return (
         <Modal visible={visible} transparent animationType="fade">
-            <View style={styles.overlay}>
-                <View style={styles.container}>
+            <TouchableWithoutFeedback onPress={onClose}>
+                <View style={styles.overlay}>
+                    <TouchableWithoutFeedback>
+                        <View style={styles.toolbar}>
+                            {/* 🎨 Кольори */}
+                            <TouchableOpacity style={styles.button} onPress={() => onHighlight("green")}>
+                                <View style={[styles.colorCircle, { backgroundColor: "green" }]} />
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.button} onPress={() => onHighlight("red")}>
+                                <View style={[styles.colorCircle, { backgroundColor: "red" }]} />
+                            </TouchableOpacity>
 
-                    <Text style={styles.selectedText} numberOfLines={3}>
-                        {text}
-                    </Text>
+                            <TouchableOpacity onPress={onDelete}>
+                                <Image source={colorWheelIcon} style={styles.icon} />
+                            </TouchableOpacity>
 
-                    <View style={styles.colorsRow}>
-                        {["yellow", "green", "pink"].map((c) => (
-                            <TouchableOpacity
-                                key={c}
-                                style={[styles.colorCircle, { backgroundColor: c }]}
-                                onPress={() => onHighlight(c)}
-                            />
-                        ))}
-                    </View>
+                            <TouchableOpacity style={styles.button} onPress={onDelete}>
+                                <Image source={underlineIcon} style={styles.icon} />
+                            </TouchableOpacity>
 
-                    <View style={styles.actionsRow}>
-                        <TouchableOpacity onPress={onAddComment} style={styles.iconBtn}>
-                            <MaterialIcons name="comment" size={26} color="#333" />
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={onCopy} style={styles.iconBtn}>
-                            <MaterialIcons name="content-copy" size={26} color="#333" />
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={onDelete} style={styles.iconBtn}>
-                            <MaterialIcons name="delete" size={26} color="red" />
-                        </TouchableOpacity>
-                    </View>
+                            <TouchableOpacity style={styles.button} onPress={onClose}>
+                                <Image source={translateIcon} style={styles.icon} />
+                            </TouchableOpacity>
 
-                    <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                        <Text style={{ color: "red", fontWeight: "bold" }}>Закрити</Text>
-                    </TouchableOpacity>
+                            <TouchableOpacity style={styles.button} onPress={onAddComment}>
+                                <Image source={commentIcon} style={styles.icon} />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity style={styles.button} onPress={onCopy}>
+                                <Image source={copyIcon} style={styles.icon} />
+                            </TouchableOpacity>
+                        </View>
+                    </TouchableWithoutFeedback>
                 </View>
-            </View>
+            </TouchableWithoutFeedback>
         </Modal>
     );
 }
@@ -72,44 +75,37 @@ export default function TextSelectionModal({
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: "rgba(0,0,0,0.4)",
         justifyContent: "center",
         alignItems: "center",
     },
-    container: {
-        width: "90%",
+    toolbar: {
+        flexDirection: "row",
         backgroundColor: "#fff",
         borderRadius: 12,
-        padding: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        elevation: 5, // Android тінь
+        shadowColor: "#000", // iOS тінь
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        alignItems: "center",
     },
-    selectedText: {
-        fontSize: 14,
-        color: "#333",
-        marginBottom: 12,
+    button: {
+        padding: 6,
+        marginHorizontal: 4,
+        borderRadius: 8,
     },
-    colorsRow: {
-        flexDirection: "row",
-        justifyContent: "center",
-        marginBottom: 16,
+    icon: {
+        width: 26,
+        height: 26,
+        resizeMode: "contain",
     },
     colorCircle: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        marginHorizontal: 6,
+        width: 26,
+        height: 26,
+        borderRadius: 13,
         borderWidth: 1,
         borderColor: "#ccc",
-    },
-    actionsRow: {
-        flexDirection: "row",
-        justifyContent: "space-around",
-        marginBottom: 16,
-    },
-    iconBtn: {
-        padding: 8,
-    },
-    closeBtn: {
-        alignSelf: "center",
-        marginTop: 10,
     },
 });

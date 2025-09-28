@@ -12,7 +12,7 @@ import { initBookDB, fetchBooks, deleteBook } from '../utils/database';
 import { pickPdfFile } from '../utils/pdfPicker';
 import { pickEpubFile } from '../utils/epubPicker';
 import { useNavigation } from '@react-navigation/native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 export default function HomeScreen() {
     const [books, setBooks] = useState([]);

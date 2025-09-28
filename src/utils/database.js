@@ -37,6 +37,16 @@ export const initBookDB = async () => {
             );
         `);
 
+    await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS comments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bookId INTEGER,
+        page INTEGER,
+        selectedText TEXT,
+        comment TEXT
+        );
+        `);
+
 
     // Захист від дублювання колонок при оновленнях
     const safeAlter = async (table, column, type) => {
@@ -133,4 +143,22 @@ export const getNotes = async (bookId) => {
 
 export const deleteNote = async (id) => {
     await db.runAsync("DELETE FROM notes WHERE id = ?", [id]);
+};
+
+export const addComment = async (bookId, page, selectedText, comment) => {
+    await db.runAsync(
+        `INSERT INTO comments (bookId, page, selectedText, comment) VALUES (?, ?, ?, ?)`,
+        [bookId, page, selectedText, comment]
+    );
+};
+
+export const getCommentsByBook = async (bookId) => {
+    return await db.getAllAsync(
+        `SELECT * FROM comments WHERE bookId = ? ORDER BY page ASC`,
+        [bookId]
+    );
+};
+
+export const deleteComment = async (id) => {
+    await db.runAsync(`DELETE FROM comments WHERE id = ?`, [id]);
 };

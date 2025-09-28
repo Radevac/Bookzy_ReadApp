@@ -46,6 +46,8 @@ const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
     html, body {
       margin: 0; padding: 0; height: 100%;
       background: #fff; overflow: hidden;
+       -webkit-user-select: text; //
+        user-select: text; //
     }
     #viewer {
       height: 100%;
@@ -59,14 +61,23 @@ const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
     }
     .textLayer {
       font-family: sans-serif;
-      font-size: 1em;
-      line-height: 1.4;
-      position: absolute;
-      top: 0; left: 0;
-      right: 0; bottom: 0;
-      pointer-events: none;
-      z-index: 2;
+  font-size: 1em;
+  line-height: 1.4;
+  position: absolute;
+  top: 0; left: 0;
+  right: 0; bottom: 0;
+  pointer-events: auto;   //
+  user-select: text;      //
+  -webkit-user-select: text;
+  z-index: 2;
     }
+    .textLayer span {
+  -webkit-user-select: text;
+  user-select: text;
+}
+::selection {
+  background: transparent; 
+}
   </style>
 </head>
 <body>
@@ -200,6 +211,37 @@ const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(
       const spans = document.querySelectorAll('.textLayer span');
       spans.forEach(s => { s.style.lineHeight = lh; });
     };
+    
+//     document.addEventListener("mouseup", () => {
+//   const selection = window.getSelection();
+//   if (selection && selection.toString().trim().length > 0) {
+//     window.ReactNativeWebView.postMessage(JSON.stringify({
+//       type: "text-selected",
+//       text: selection.toString()
+//     }));
+//   }
+// });
+document.addEventListener("selectionchange", () => {
+  const selection = window.getSelection();
+  if (selection && selection.toString().trim().length > 0) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: "text-selected",
+      text: selection.toString()
+    }));
+  }
+});
+// document.addEventListener("selectionchange", () => {
+//   const sel = window.getSelection();
+//   if (sel && sel.toString().length > 0) {
+//     const text = sel.toString();
+//     sel.removeAllRanges();
+//
+//     window.ReactNativeWebView.postMessage(JSON.stringify({
+//       type: "text-selected",
+//       text
+//     }));
+//   }
+// });
   </script>
 </body>
 </html>

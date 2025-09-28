@@ -47,6 +47,9 @@ export default function EpubReader({ route }) {
 
     const [lastPreview, setLastPreview] = useState<string>("");
 
+    const [comments, setComments] = useState<any[]>([]);
+    const [highlights, setHighlights] = useState<any[]>([]);
+
     const [readerSettings, setReaderSettings] = useState({
         theme: 'light',
         fontSize: 16,
@@ -67,6 +70,7 @@ export default function EpubReader({ route }) {
     }, [notesModalVisible]);
 
     const previewResolver = useRef<((text: string) => void) | null>(null);
+
 
     const getEpubPreview = (): Promise<string> => {
         return new Promise((resolve) => {
@@ -118,11 +122,11 @@ export default function EpubReader({ route }) {
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://unpkg.com/epubjs/dist/epub.min.js"></script>
-    <style>
-        html, body, #viewer, iframe, .epub-container {
+  <meta charset="utf-8" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://unpkg.com/epubjs/dist/epub.min.js"></script>
+  <style>
+    html, body, #viewer, iframe, .epub-container {
       margin: 0;
       padding: 0;
       height: 100%;
@@ -130,16 +134,20 @@ export default function EpubReader({ route }) {
       background: #fff !important;
     }
     #viewer {
-      overflow-y: auto;  
+      overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
-    </style>
+  </style>
 </head>
 <body>
-    <div id="viewer"></div>
-    <script>
+  <div id="viewer"></div>
+  <script>
     window.onerror = function(message, source, lineno, colno, error) {
-        window.ReactNativeWebView.postMessage("❌ ERROR: " + message + "\\\\n" + (error?.stack || ""));
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "error",
+        message,
+        stack: error?.stack || ""
+      }));
     };
 
     const base64 = "${base64}";
@@ -147,40 +155,41 @@ export default function EpubReader({ route }) {
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+      bytes[i] = binaryString.charCodeAt(i);
     }
 
     const blob = new Blob([bytes], { type: "application/epub+zip" });
     const book = ePub(blob);
-    
+
     const rendition = book.renderTo("viewer", {
-         width: "100%",
-  height: "100%",
-    flow: "scrolled-doc", 
-  spread: "none",
-  manager: "continuous"
+      width: "100%",
+      height: "100%",
+      flow: "scrolled-doc",
+      spread: "none",
+      manager: "continuous"
     });
 
+    // Стиль для читання
     rendition.themes.default({
-        body: {
-              "background": "#fff !important",
-    "color": "#000 !important",
-    "font-size": "120%",
-    "line-height": "1.6",
-    "text-align": "justify",
-    "margin": "0 auto",
-    "max-width": "95%",
-        },
-        img: {
-            "max-width": "100%",
-            "height": "auto",
-            "display": "block",
-            "margin": "1em auto"
-        },
-        ".search-highlight": {
-            "background": "yellow",
-            "opacity": "0.6"
-        }
+      body: {
+        "background": "#fff !important",
+        "color": "#000 !important",
+        "font-size": "120%",
+        "line-height": "1.6",
+        "text-align": "justify",
+        "margin": "0 auto",
+        "max-width": "95%"
+      },
+      img: {
+        "max-width": "100%",
+        "height": "auto",
+        "display": "block",
+        "margin": "1em auto"
+      },
+      ".search-highlight": {
+        "background": "yellow",
+        "opacity": "0.6"
+      }
     });
 
     let totalLocations = 0;
@@ -188,127 +197,130 @@ export default function EpubReader({ route }) {
     const savedLocation = ${currentPage};
 
     book.ready.then(() => {
-    return Promise.all([
+      return Promise.all([
         book.locations.generate(1600),
         book.loaded.navigation
-    ]);
-}).then(([_, navigation]) => {
-    totalLocations = book.locations.length();
+      ]);
+    }).then(([_, navigation]) => {
+      totalLocations = book.locations.length();
 
-    if (navigation && navigation.toc) {
+      // TOC (chapters)
+      if (navigation && navigation.toc) {
         const toc = navigation.toc.map(item => ({
-            label: item.label,
-            href: item.href
+          label: item.label,
+          href: item.href
         }));
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'toc', toc }));
-    }
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: "toc", toc }));
+      }
 
-    if (savedLocation > 0 && totalLocations > 0) {
-  const cfi = book.locations.cfiFromLocation(savedLocation);
-  rendition.display(cfi).catch(() => rendition.display());
-}
+      // Відновлення позиції
+      if (savedLocation > 0 && totalLocations > 0) {
+        const cfi = book.locations.cfiFromLocation(savedLocation);
+        rendition.display(cfi).catch(() => rendition.display());
+      } else {
+        rendition.display();
+      }
 
-    rendition.on("relocated", (location) => {
+      // Прогрес
+      rendition.on("relocated", (location) => {
         try {
-            currentLocation = book.locations.locationFromCfi(location.start.cfi);
+          currentLocation = book.locations.locationFromCfi(location.start.cfi);
         } catch (e) {
-            currentLocation = 0;
+          currentLocation = 0;
         }
-
         window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'progress',
-            currentLocation,
-            totalLocations
+          type: "progress",
+          currentLocation,
+          totalLocations
         }));
-    });
+      });
 
-    window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'init',
+      // Init
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "init",
         currentLocation: savedLocation,
         totalLocations
-    }));
-});
+      }));
+    });
+
+    window.searchInBook = async function(query) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "debug",
+        message: "[CALL] searchInBook: " + query
+      }));
+
+      const results = [];
+      const spineItems = book.spine.spineItems;
+
+      for (let i = 0; i < spineItems.length; i++) {
+        const item = spineItems[i];
+        try {
+          await item.load(book.load.bind(book));
+          const doc = item.document;
+          const body = doc && doc.body;
+          if (!body) continue;
+
+          const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
+          while (walker.nextNode()) {
+            const node = walker.currentNode;
+            const text = node.textContent;
+            const index = text.toLowerCase().indexOf(query.toLowerCase());
+            if (index !== -1) {
+              const range = doc.createRange();
+              range.setStart(node, index);
+              range.setEnd(node, index + query.length);
+
+              const cfi = item.cfiFromRange(range);
+              results.push({
+                cfi,
+                excerpt: node.textContent.slice(Math.max(0, index - 30), index + query.length + 30)
+              });
+            }
+          }
+          await item.unload();
+        } catch (e) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: "debug",
+            message: "[ERROR] spineItem: " + e.message
+          }));
+        }
+      }
+
+      if (results.length > 0) {
+        await rendition.display(results[0].cfi);
+        window.highlightSearchResults(results);
+      }
+
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "searchResults",
+        results
+      }));
+    };
+
+    window.highlightSearchResults = function(results) {
+      let count = 0;
+      results.forEach(result => {
+        try {
+          rendition.annotations.highlight(result.cfi, {}, () => {}, "search-highlight");
+          count++;
+        } catch (e) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: "debug",
+            message: "[SKIPPED] Invalid CFI: " + e.message
+          }));
+        }
+      });
+
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "debug",
+        message: "[✅] Highlighted: " + count + "/" + results.length
+      }));
+    };
 
     window.book = book;
     window.rendition = rendition;
     window.currentFontSize = 120;
-
-    window.searchInBook = async function(query) {
-    window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'debug',
-        message: '[CALL] searchInBook called with: ' + query
-    }));
-
-    const results = [];
-    const spineItems = book.spine.spineItems;
-
-    for (let i = 0; i < spineItems.length; i++) {
-        const item = spineItems[i];
-
-        try {
-            await item.load(book.load.bind(book));
-            const doc = item.document;
-            const body = doc && doc.body;
-            if (!body) continue;
-
-            const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
-            while (walker.nextNode()) {
-                const node = walker.currentNode;
-                const text = node.textContent;
-                const index = text.toLowerCase().indexOf(query.toLowerCase());
-                if (index !== -1) {
-                    const range = doc.createRange();
-                    range.setStart(node, index);
-                    range.setEnd(node, index + query.length);
-
-                    const cfi = item.cfiFromRange(range);
-                    results.push({
-                        cfi,
-                        excerpt: node.textContent.slice(Math.max(0, index - 30), index + query.length + 30)
-                    });
-                }
-            }
-
-            await item.unload();
-        } catch (e) {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'debug',
-                message: '[ERROR] Failed in spineItem: ' + e.message
-            }));
-        }
-    }
-
-    if (results.length > 0) {
-        await rendition.display(results[0].cfi);
-        window.highlightSearchResults(results);
-    }
-
-    window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'searchResults',
-        results
-    }));
-};
-
-   window.highlightSearchResults = function(results) {
-    let count = 0;
-    results.forEach(result => {
-        try {
-            rendition.annotations.highlight(result.cfi, {}, () => {}, 'search-highlight');
-            count++;
-        } catch (e) {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'debug',
-                message: '[SKIPPED] Invalid CFI: ' + e.message
-            }));
-        }
-    });
-
-    window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'debug',
-        message: '[✅] Highlighted: ' + count + ' of ' + results.length
-    }));
-}
-</script>
+  </script>
 </body>
 </html>
 `;
@@ -423,11 +435,13 @@ export default function EpubReader({ route }) {
                 onClose={() => setNotesModalVisible(false)}
                 chapters={chapters}
                 bookmarks={bookmarks}
+                comments={comments}       // ✅ масив коментарів із useState
+                highlights={highlights}   // ✅ масив виділень із useState
                 onSelectChapter={(href) => {
                     webViewRef.current?.injectJavaScript(`
-            window.rendition.display(${JSON.stringify(href)});
-            true;
-        `);
+      window.rendition.display(${JSON.stringify(href)});
+      true;
+    `);
                 }}
                 onDeleteBookmark={async (page) => {
                     await deleteBookmark(book.id, page);

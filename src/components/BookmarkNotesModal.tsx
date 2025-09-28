@@ -13,6 +13,8 @@ interface Props {
     onClose: () => void;
     chapters: any[];
     bookmarks: any[];
+    comments: any[];
+    highlights: any[];
     onSelectChapter: (href: string) => void;
     onDeleteBookmark: (page: number) => void;
 }
@@ -21,14 +23,22 @@ interface Props {
 export default function BookmarkNotesModal({
                                                visible,
                                                onClose,
-                                               chapters,
-                                               bookmarks,
+                                               chapters = [],
+                                               bookmarks = [],
+                                               comments = [],
+                                               highlights = [],
                                                onSelectChapter,
                                                onDeleteBookmark,
                                            }: Props) {
     const [activeTab, setActiveTab] = useState<"chapters" | "bookmarks">(
         "chapters"
     );
+
+    const combinedData = [
+        ...(bookmarks || []).map(b => ({ ...b, type: "bookmark" })),
+        ...(comments || []).map(c => ({ ...c, type: "comment" })),
+        ...(highlights || []).map(h => ({ ...h, type: "highlight" })),
+    ];
 
     return (
         <Modal
@@ -100,21 +110,51 @@ export default function BookmarkNotesModal({
                         ) : (
                             <Text style={styles.emptyText}>Немає розділів</Text>
                         )
-                    ) : bookmarks.length > 0 ? (
+                    ) : (bookmarks.length > 0 || comments.length > 0 || highlights.length > 0) ? (
                         <FlatList
-                            data={bookmarks}
-                            keyExtractor={(item) => item.id.toString()}
+                            data={combinedData}
+                            keyExtractor={(item, index) => `${item.type}-${item.id}-${index}`}
                             renderItem={({ item }) => (
                                 <View style={styles.itemRow}>
-                                    <View style={{flex: 1, paddingRight: 8}}>
-                                        <Text style={styles.itemText}>Сторінка {item.page}</Text>
-                                        <Text numberOfLines={1} style={{color: '#666', marginTop: 2}}>
-                                            {item.preview?.trim() || '…'}
+                                    <View style={{ flex: 1, paddingRight: 8 }}>
+                                        <Text style={styles.itemTitle}>
+                                            {item.type === "bookmark"
+                                                ? ""
+                                                : item.type === "comment"
+                                                    ? "Коментар"
+                                                    : "Виділення"}
                                         </Text>
+
+                                        {item.type === "bookmark" && (
+                                            <>
+                                                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                                                    <Text style={styles.itemTitle}>Закладка</Text>
+                                                    <Text style={[styles.itemText, { color: "#555" }]}>Ст {item.page}</Text>
+                                                </View>
+                                                <Text numberOfLines={2} style={{ color: "#666", marginTop: 2 }}>
+                                                    {item.preview?.trim() || "…"}
+                                                </Text>
+                                            </>
+                                        )}
+
+                                        {item.type === "comment" && (
+                                            <>
+                                                {/*<Text style={styles.itemText}> {item.page}</Text>*/}
+                                                <Text numberOfLines={2} style={styles.commentText}>
+                                                    {item.comment}
+                                                </Text>
+                                            </>
+                                        )}
+
+                                        {item.type === "highlight" && (
+                                            <>
+                                                <Text style={styles.itemText}>Сторінка {item.page}</Text>
+                                                <Text numberOfLines={2} style={{ color: item.color || "green" }}>
+                                                    {item.selectedText}
+                                                </Text>
+                                            </>
+                                        )}
                                     </View>
-                                    {/*<TouchableOpacity onPress={() => onDeleteBookmark(item.page)}>*/}
-                                    {/*    <Text style={styles.deleteText}>Видалити</Text>*/}
-                                    {/*</TouchableOpacity>*/}
                                 </View>
                             )}
                         />
@@ -201,5 +241,16 @@ const styles = StyleSheet.create({
         marginTop: 20,
         textAlign: "center",
         color: "#777",
+    },
+    itemTitle: {
+        fontSize: 14,
+        fontWeight: "bold",
+        color: "green",
+    },
+    commentText: {
+        marginTop: 4,
+        fontSize: 13,
+        color: "#444",
+        fontStyle: "italic",
     },
 });
