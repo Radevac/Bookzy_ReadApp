@@ -55,6 +55,47 @@ export default function EpubViewer({ path, bookId }: Props) {
         totalPages
       }));
     });
+    
+    rendition.on("rendered", (section, view) => {
+  const { document, window: iframeWindow } = view.contents;
+  if (!document) return;
+
+  const style = document.createElement("style");
+  style.innerHTML = "*{ -webkit-user-select:text !important; user-select:text !important; }";
+  document.head.appendChild(style);
+
+  const bridge =
+    (iframeWindow.parent && iframeWindow.parent.ReactNativeWebView)
+      ? iframeWindow.parent.ReactNativeWebView
+      : (window.ReactNativeWebView || null); 
+
+  const post = (payload) => {
+    try { bridge && bridge.postMessage(JSON.stringify(payload)); } catch (_) {}
+  };
+
+  let t;
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      const sel = iframeWindow.getSelection();
+      if (!sel || !sel.toString().trim()) return;
+
+      try {
+        const range = sel.getRangeAt(0);
+        const cfi = section.cfiFromRange(range);
+        const rect = range.getBoundingClientRect();
+        post({
+          type: "text-selected",
+          text: sel.toString(),
+          cfi,
+          rect: { x: rect.left, y: rect.top, w: rect.width, h: rect.height }
+        });
+      } catch (err) {
+        post({ type: "debug", message: "selection error: " + err.message });
+      }
+    }, 50);
+  });
+});
 
     window.book = book;
     window.rendition = rendition;

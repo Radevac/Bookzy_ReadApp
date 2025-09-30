@@ -241,7 +241,7 @@ export default function ReaderScreen({ route }) {
                 }))}
                 bookmarks={bookmarks}
                 comments={comments}
-                highlights={highlights} // поки пустий масив, потім реалізуємо
+                highlights={highlights}
                 onSelectChapter={(page) => {
                     viewerRef.current?.injectJavaScript(`
       document.getElementById("viewer").scrollTop = pageOffsets[Number(${page}) - 1] || 0;

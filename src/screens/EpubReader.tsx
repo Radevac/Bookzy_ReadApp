@@ -13,15 +13,18 @@ import {
 import { WebView } from 'react-native-webview';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
-    addBookmark,
-    deleteBookmark, getBookmarksByBook, getNotes,
+    addBookmark, addComment,
+    deleteBookmark, getBookmarksByBook, getCommentsByBook, getNotes,
     isBookmarked,
     updateBookProgress,
 } from '../utils/database';
+import * as Clipboard from "expo-clipboard";
 
 import ReadingSettingsScreen from './ReadingSettingsScreen';
 import BookmarkNotesModal from "../components/BookmarkNotesModal";
-
+import TextSelectionModal from "../components/TextSelectionModal";
+import CommentModal from "../components/CommentModal";
+import CommentInputModal from "../components/CommentInputModal";
 
 export default function EpubReader({ route }) {
     const { book } = route.params;
@@ -49,6 +52,14 @@ export default function EpubReader({ route }) {
 
     const [comments, setComments] = useState<any[]>([]);
     const [highlights, setHighlights] = useState<any[]>([]);
+
+    const [selectionModalVisible, setSelectionModalVisible] = useState(false);
+    const [selectedText, setSelectedText] = useState<string | null>(null);
+    const [selectedCfi, setSelectedCfi] = useState<string | null>(null);
+
+    const [commentModalVisible, setCommentModalVisible] = useState(false);
+    const [selectionRect, setSelectionRect] = useState<{x:number,y:number,w:number,h:number}|null>(null);
+
 
     const [readerSettings, setReaderSettings] = useState({
         theme: 'light',
@@ -169,28 +180,38 @@ export default function EpubReader({ route }) {
       manager: "continuous"
     });
 
-    // Стиль для читання
-    rendition.themes.default({
-      body: {
-        "background": "#fff !important",
-        "color": "#000 !important",
-        "font-size": "120%",
-        "line-height": "1.6",
-        "text-align": "justify",
-        "margin": "0 auto",
-        "max-width": "95%"
-      },
-      img: {
-        "max-width": "100%",
-        "height": "auto",
-        "display": "block",
-        "margin": "1em auto"
-      },
-      ".search-highlight": {
-        "background": "yellow",
-        "opacity": "0.6"
-      }
-    });
+ 
+   window.readerSettings = { theme: "light", fontSize: 16, lineHeight: 1.6 };
+
+window.applyReaderStyle = function applyReaderStyle() {
+  const { theme, fontSize, lineHeight } = window.readerSettings || {};
+  const bg    = theme === "dark"  ? "#1c1c1c" : theme === "sepia" ? "#f5ecd9" : "#fff";
+  const color = theme === "dark"  ? "#fff"    : "#000";
+  
+  rendition.themes.register("readerTheme", {
+    body: {
+      background: bg,
+      color,
+      "font-size": fontSize + "px",
+      "line-height": String(lineHeight),
+      "text-align": "justify",
+      "margin": "0 auto",
+      "max-width": "95%"
+    },
+    img: {
+      "max-width": "100%",
+      height: "auto",
+      display: "block",
+      margin: "1em auto"
+    },
+    ".search-highlight": {
+      background: "yellow",
+      opacity: "0.6"
+    }
+  });
+  
+  rendition.themes.select("readerTheme");
+};
 
     let totalLocations = 0;
     let currentLocation = 0;
@@ -316,6 +337,47 @@ export default function EpubReader({ route }) {
         message: "[✅] Highlighted: " + count + "/" + results.length
       }));
     };
+   rendition.on("rendered", (section, view) => {
+  const { document, window: iframeWindow } = view.contents;
+  if (!document) return;
+
+ 
+  const style = document.createElement("style");
+  style.innerHTML = "*{ -webkit-user-select:text !important; user-select:text !important; }";
+  document.head.appendChild(style);
+
+  const bridge =
+    (iframeWindow.parent && iframeWindow.parent.ReactNativeWebView)
+      ? iframeWindow.parent.ReactNativeWebView
+      : (window.ReactNativeWebView || null);
+
+  const post = (payload) => {
+    try { bridge && bridge.postMessage(JSON.stringify(payload)); } catch (_) {}
+  };
+
+  let t;
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      const sel = iframeWindow.getSelection();
+      if (!sel || !sel.toString().trim()) return;
+
+      try {
+        const range = sel.getRangeAt(0);
+        const cfi = section.cfiFromRange(range);
+        const rect = range.getBoundingClientRect();
+        post({
+          type: "text-selected",
+          text: sel.toString(),
+          cfi,
+          rect: { x: rect.left, y: rect.top, w: rect.width, h: rect.height }
+        });
+      } catch (err) {
+        post({ type: "debug", message: "selection error: " + err.message });
+      }
+    }, 50);
+  });
+});
 
     window.book = book;
     window.rendition = rendition;
@@ -346,6 +408,14 @@ export default function EpubReader({ route }) {
                     previewResolver.current(parsed.text);
                     previewResolver.current = null;
                 }
+                return;
+            }
+            if (parsed.type === "text-selected") {
+                if (showResults) setShowResults(false);
+                setSelectedText(parsed.text ?? "");
+                setSelectedCfi(parsed.cfi ?? null);
+                setSelectionRect(parsed.rect);
+                setSelectionModalVisible(true);
                 return;
             }
 
@@ -430,13 +500,14 @@ export default function EpubReader({ route }) {
                 <MaterialIcons name="list" size={28} color="black" />
             </TouchableOpacity>
 
+
             <BookmarkNotesModal
                 visible={notesModalVisible}
                 onClose={() => setNotesModalVisible(false)}
                 chapters={chapters}
                 bookmarks={bookmarks}
-                comments={comments}       // ✅ масив коментарів із useState
-                highlights={highlights}   // ✅ масив виділень із useState
+                comments={comments}
+                highlights={highlights}
                 onSelectChapter={(href) => {
                     webViewRef.current?.injectJavaScript(`
       window.rendition.display(${JSON.stringify(href)});
@@ -448,6 +519,62 @@ export default function EpubReader({ route }) {
                     await loadBookmarksAndNotes();
                 }}
             />
+            <TextSelectionModal
+                visible={selectionModalVisible}
+                onClose={() => setSelectionModalVisible(false)}
+                onAddComment={() => {
+                    setSelectionModalVisible(false);
+                    setCommentModalVisible(true);
+                }}
+                onHighlight={(color) => {
+                    if (!selectedCfi) return;
+                    webViewRef.current?.injectJavaScript(`
+      try { window.rendition.annotations.highlight("${selectedCfi}", {}, null, "hl-${color}"); } catch(e){}
+      true;
+    `);
+                    setSelectionModalVisible(false);
+                }}
+                onCopy={() => {
+                    if (selectedText) {
+                        Clipboard.setStringAsync(selectedText);
+                        Alert.alert("Скопійовано!");
+                    }
+                }}
+                onDelete={() => {
+                    if (!selectedCfi) return;
+                    webViewRef.current?.injectJavaScript(`
+      try { window.rendition.annotations.remove("${selectedCfi}", "highlight"); } catch(e){}
+      true;
+    `);
+                    setSelectionModalVisible(false);
+                }}
+            />
+            <CommentModal
+                visible={commentModalVisible}
+                onClose={() => setCommentModalVisible(false)}
+                onSave={async (text) => {
+                    if (book?.id) {
+                        await addComment(book.id, currentPage, selectedText || "", text);
+                        setCommentModalVisible(false);
+                        const bmarks = await getBookmarksByBook(book.id);
+                        setBookmarks(bmarks);
+                    }
+                }}
+            />
+            <CommentInputModal
+                visible={commentModalVisible}
+                onClose={() => setCommentModalVisible(false)}
+                onSave={async (text) => {
+                    await addComment(book.id, currentPage, selectedText, text);
+
+                    const updated = await getCommentsByBook(book.id);
+                    setComments(updated);
+
+                    setCommentModalVisible(false);
+                }}
+            />
+
+
             <TouchableOpacity
                 onPress={() => setSettingsVisible(true)}
                 style={{
@@ -538,6 +665,7 @@ export default function EpubReader({ route }) {
 
                 </View>
             </Modal>
+
             <ReadingSettingsScreen
                 visible={settingsVisible}
                 onClose={() => setSettingsVisible(false)}

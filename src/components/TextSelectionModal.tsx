@@ -37,7 +37,6 @@ export default function TextSelectionModal({
                 <View style={styles.overlay}>
                     <TouchableWithoutFeedback>
                         <View style={styles.toolbar}>
-                            {/* 🎨 Кольори */}
                             <TouchableOpacity style={styles.button} onPress={() => onHighlight("green")}>
                                 <View style={[styles.colorCircle, { backgroundColor: "green" }]} />
                             </TouchableOpacity>
@@ -84,8 +83,8 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         paddingHorizontal: 12,
         paddingVertical: 8,
-        elevation: 5, // Android тінь
-        shadowColor: "#000", // iOS тінь
+        elevation: 5,
+        shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.15,
         shadowRadius: 4,
