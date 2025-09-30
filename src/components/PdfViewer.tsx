@@ -242,6 +242,36 @@ document.addEventListener("selectionchange", () => {
 //     }));
 //   }
 // });
+ window.searchInPdf = function(query) {
+      const results = [];
+      const spans = document.querySelectorAll('.textLayer span');
+      spans.forEach((span, index) => {
+        const text = span.textContent || "";
+        const lower = text.toLowerCase();
+        const q = query.toLowerCase();
+        const pos = lower.indexOf(q);
+        if (pos !== -1) {
+          const excerpt = text.slice(Math.max(0, pos - 30), pos + q.length + 30);
+          results.push({
+            index,
+            excerpt
+          });
+          span.style.backgroundColor = "yellow";
+        }
+      });
+
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: "searchResults",
+        results
+      }));
+    };
+
+    window.scrollToResult = function(index) {
+      const spans = document.querySelectorAll('.textLayer span');
+      if (spans[index]) {
+        spans[index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    };
   </script>
 </body>
 </html>

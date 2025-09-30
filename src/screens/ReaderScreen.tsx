@@ -5,7 +5,7 @@ import {
     TextInput,
     StyleSheet,
     TouchableOpacity,
-    Alert,
+    Alert, Modal, FlatList,
 } from 'react-native';
 import PdfViewer, { PdfViewerHandle } from '../components/PdfViewer';
 import {
@@ -44,6 +44,8 @@ export default function ReaderScreen({ route }) {
     const [comments, setComments] = useState<any[]>([]);
     const [highlights, setHighlights] = useState<any[]>([]);
 
+    const [searchResults, setSearchResults] = useState<any[]>([]);
+    const [resultsVisible, setResultsVisible] = useState(false);
 
     const [settingsVisible, setSettingsVisible] = useState(false);
     const [readerSettings, setReaderSettings] = useState({
@@ -129,6 +131,13 @@ export default function ReaderScreen({ route }) {
                 return;
             }
 
+
+            if (parsed.type === "searchResults") {
+                setSearchResults(parsed.results || []);
+                setResultsVisible(true);
+                return;
+            }
+
             if (parsed.type === "progress" || parsed.type === "init") {
                 const { currentPage: page = 0, totalPages = 1 } = parsed;
                 setCurrentPage(page);
@@ -154,6 +163,22 @@ export default function ReaderScreen({ route }) {
         viewerRef.current?.injectJavaScript(`
       window.postMessage(JSON.stringify({ type: 'prev-highlight' }), '*');
     `);
+    };
+
+    const runSearch = () => {
+        if (searchTerm.trim().length === 0) return;
+        viewerRef.current?.injectJavaScript(`
+      window.searchInPdf("${searchTerm}");
+      true;
+    `);
+    };
+
+    const scrollToResult = (index: number) => {
+        viewerRef.current?.injectJavaScript(`
+      window.scrollToResult(${index});
+      true;
+    `);
+        setResultsVisible(false);
     };
 
     const toggleBookmark = async () => {
@@ -222,6 +247,9 @@ export default function ReaderScreen({ route }) {
                 <TouchableOpacity onPress={goToNextMatch} style={styles.button}>
                     <Text>→</Text>
                 </TouchableOpacity>
+                <TouchableOpacity onPress={runSearch} style={styles.button}>
+                    <Text>Знайти</Text>
+                </TouchableOpacity>
             </View>
 
             <PdfViewer
@@ -232,6 +260,36 @@ export default function ReaderScreen({ route }) {
                 onMessage={handleMessage}
                 searchTerm={searchTerm}
             />
+            <Modal visible={resultsVisible} animationType="slide">
+                <View style={{ flex: 1, padding: 16 }}>
+                    <Text style={{ fontSize: 18, fontWeight: "bold" }}>
+                        Результати пошуку ({searchResults.length})
+                    </Text>
+                    <FlatList
+                        data={searchResults}
+                        keyExtractor={(_, i) => i.toString()}
+                        renderItem={({ item, index }) => (
+                            <TouchableOpacity
+                                style={{
+                                    padding: 12,
+                                    borderBottomWidth: 1,
+                                    borderColor: "#ccc",
+                                }}
+                                onPress={() => scrollToResult(item.index)}
+                            >
+                                <Text>{item.excerpt}</Text>
+                            </TouchableOpacity>
+                        )}
+                    />
+                    <TouchableOpacity
+                        onPress={() => setResultsVisible(false)}
+                        style={{ padding: 12, backgroundColor: "#ddd", marginTop: 10 }}
+                    >
+                        <Text>Закрити</Text>
+                    </TouchableOpacity>
+                </View>
+            </Modal>
+
             <BookmarkNotesModal
                 visible={notesModalVisible}
                 onClose={() => setNotesModalVisible(false)}
